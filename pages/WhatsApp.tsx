@@ -1,49 +1,46 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { whatsappService } from '../services/whatsapp';
 import { botService } from '../services/bots';
 import { Bot, WhatsAppConnectionStatus } from '../types';
+import BackendOffline from '../components/BackendOffline';
 import { 
-  Smartphone, 
-  Link2, 
-  Copy, 
-  Check, 
-  AlertTriangle, 
-  Ban, 
-  Clock, 
-  RefreshCw, 
-  Wifi, 
-  WifiOff, 
-  ShieldAlert
+  Smartphone, Link2, Copy, Check, AlertTriangle, Ban, Clock, RefreshCw, Wifi, WifiOff, ShieldAlert, Loader2
 } from 'lucide-react';
 
 const WhatsApp: React.FC = () => {
   const [bots, setBots] = useState<Bot[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
-  
-  // State for the flow
   const [status, setStatus] = useState<WhatsAppConnectionStatus>('disconnected');
   const [loading, setLoading] = useState(false);
+  const [initLoading, setInitLoading] = useState(true);
+  const [error, setError] = useState(false);
   
-  // Pairing Code Data
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [copied, setCopied] = useState(false);
-
   const timerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    botService.getAll().then((data) => {
-      // Robust check
+  const loadBots = useCallback(async () => {
+    setInitLoading(true);
+    setError(false);
+    try {
+      const data = await botService.getAll();
       const safeData = Array.isArray(data) ? data : [];
       setBots(safeData);
       if (safeData.length > 0) setSelectedBotId(safeData[0].id);
-    }).catch(err => {
-      console.error(err);
+    } catch (err) {
+      setError(true);
       setBots([]);
-    });
+    } finally {
+      setInitLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadBots();
+  }, [loadBots]);
 
   // Fetch status when bot selection changes
   useEffect(() => {
@@ -59,10 +56,9 @@ const WhatsApp: React.FC = () => {
       timerRef.current = window.setInterval(() => {
         const now = Date.now();
         const diff = Math.ceil((expiresAt - now) / 1000);
-        
         if (diff <= 0) {
           setTimeLeft(0);
-          setPairingCode(null); // Expire code visually
+          setPairingCode(null);
           clearTimer();
         } else {
           setTimeLeft(diff);
@@ -85,10 +81,10 @@ const WhatsApp: React.FC = () => {
     try {
       const currentStatus = await whatsappService.getStatus(selectedBotId);
       setStatus(currentStatus);
-      // Reset pairing state if status changed externally
-      if (currentStatus === 'connected') {
-        setPairingCode(null);
-      }
+      if (currentStatus === 'connected') setPairingCode(null);
+    } catch (e) {
+      // If specific status check fails but we loaded bots, just show as disconnected or error toast
+      setStatus('disconnected');
     } finally {
       setLoading(false);
     }
@@ -104,8 +100,7 @@ const WhatsApp: React.FC = () => {
       setTimeLeft(response.expiresIn);
       setStatus('pairing');
     } catch (e) {
-      console.error(e);
-      // Handle error (e.g., set status to cooldown if API says so)
+      alert("Falha ao gerar código. Backend offline?");
     } finally {
       setLoading(false);
     }
@@ -122,12 +117,26 @@ const WhatsApp: React.FC = () => {
   const handleDisconnect = async () => {
     if (!selectedBotId) return;
     if (window.confirm('Tem certeza que deseja desconectar?')) {
-      await whatsappService.disconnect(selectedBotId);
-      setStatus('disconnected');
+      try {
+        await whatsappService.disconnect(selectedBotId);
+        setStatus('disconnected');
+      } catch (e) {
+        alert("Falha ao desconectar.");
+      }
     }
   };
 
-  // Helper to render status badge
+  if (error) {
+     return (
+        <div className="space-y-6">
+             <h1 className="text-3xl font-bold text-white">Conexão WhatsApp</h1>
+             <BackendOffline onRetry={loadBots} />
+        </div>
+     );
+  }
+
+  if (initLoading) return <div className="flex h-96 items-center justify-center text-emerald-500"><Loader2 size={40} className="animate-spin" /></div>;
+
   const renderStatusBadge = () => {
     const styles = {
       connected: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
@@ -161,9 +170,6 @@ const WhatsApp: React.FC = () => {
     );
   };
 
-  // Defensive copy for render
-  const safeBots = Array.isArray(bots) ? bots : [];
-
   return (
     <div className="max-w-5xl mx-auto space-y-8">
       <div className="flex justify-between items-start">
@@ -178,29 +184,34 @@ const WhatsApp: React.FC = () => {
         {/* Left Panel: Bot Selection */}
         <div className="md:col-span-1 space-y-4">
           <label className="block text-sm font-medium text-slate-400">Selecionar Instância</label>
-          <div className="space-y-2">
-            {safeBots.map((bot) => (
-              <button
-                key={bot.id}
-                onClick={() => setSelectedBotId(bot.id)}
-                className={`w-full text-left px-4 py-3 rounded-lg border transition-all ${
-                  selectedBotId === bot.id 
-                    ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/50' 
-                    : 'border-slate-800 hover:border-slate-700 bg-slate-900'
-                }`}
-              >
-                <div className="font-medium text-slate-200">{bot.name}</div>
-                <div className="text-xs text-slate-500">{bot.phoneNumber}</div>
-              </button>
-            ))}
-          </div>
+          {bots.length === 0 ? (
+             <div className="p-4 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-500 text-center">
+                Nenhum robô disponível.
+             </div>
+          ) : (
+            <div className="space-y-2">
+                {bots.map((bot) => (
+                <button
+                    key={bot.id}
+                    onClick={() => setSelectedBotId(bot.id)}
+                    className={`w-full text-left px-4 py-3 rounded-lg border transition-all ${
+                    selectedBotId === bot.id 
+                        ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/50' 
+                        : 'border-slate-800 hover:border-slate-700 bg-slate-900'
+                    }`}
+                >
+                    <div className="font-medium text-slate-200">{bot.name}</div>
+                    <div className="text-xs text-slate-500">{bot.phoneNumber}</div>
+                </button>
+                ))}
+            </div>
+          )}
         </div>
 
         {/* Right Panel: Content Area */}
         <div className="md:col-span-2">
           <div className="bg-slate-900 rounded-2xl shadow-lg border border-slate-800 p-8 flex flex-col items-center justify-center min-h-[450px] relative overflow-hidden">
             
-            {/* --- LOADING STATE --- */}
             {loading && (
               <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center z-10 backdrop-blur-sm">
                 <div className="flex flex-col items-center gap-3">
@@ -210,7 +221,6 @@ const WhatsApp: React.FC = () => {
               </div>
             )}
 
-            {/* --- STATE: CONNECTED --- */}
             {status === 'connected' && (
               <div className="text-center space-y-6">
                 <div className="w-24 h-24 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mx-auto border-2 border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
@@ -231,7 +241,6 @@ const WhatsApp: React.FC = () => {
               </div>
             )}
 
-            {/* --- STATE: PAIRING CODE DISPLAY --- */}
             {status === 'pairing' && pairingCode && timeLeft > 0 && (
               <div className="w-full max-w-md space-y-8 animate-fade-in">
                 <div className="text-center">
@@ -274,7 +283,6 @@ const WhatsApp: React.FC = () => {
               </div>
             )}
 
-            {/* --- STATE: DISCONNECTED / INITIAL --- */}
             {status === 'disconnected' && (
               <div className="text-center space-y-6">
                 <div className="w-20 h-20 bg-slate-800 text-slate-500 rounded-full flex items-center justify-center mx-auto border border-slate-700">
@@ -297,7 +305,6 @@ const WhatsApp: React.FC = () => {
               </div>
             )}
 
-            {/* --- STATE: EXPIRED CODE --- */}
             {(status === 'pairing' && (!pairingCode || timeLeft === 0)) && (
                <div className="text-center space-y-4">
                   <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mx-auto border border-amber-500/20">
@@ -317,7 +324,6 @@ const WhatsApp: React.FC = () => {
                </div>
             )}
 
-            {/* --- STATE: COOLDOWN --- */}
             {status === 'cooldown' && (
               <div className="text-center space-y-4 max-w-sm">
                 <div className="w-16 h-16 bg-orange-500/10 text-orange-500 rounded-full flex items-center justify-center mx-auto border border-orange-500/20">
@@ -328,14 +334,10 @@ const WhatsApp: React.FC = () => {
                   <p className="text-slate-400 text-sm mt-2">
                     O WhatsApp limitou temporariamente as tentativas de conexão para este número.
                   </p>
-                  <p className="text-slate-500 text-xs mt-4 bg-slate-950 py-2 rounded">
-                    Tente novamente em algumas horas.
-                  </p>
                 </div>
               </div>
             )}
 
-            {/* --- STATE: BLOCKED --- */}
             {status === 'blocked' && (
               <div className="text-center space-y-4 max-w-sm">
                 <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto border border-rose-500/20">
@@ -344,11 +346,8 @@ const WhatsApp: React.FC = () => {
                 <div>
                   <h3 className="text-lg font-bold text-white">Sessão Bloqueada</h3>
                   <p className="text-slate-400 text-sm mt-2">
-                    A conexão foi recusada pelos servidores. Isso acontece por tentativas rápidas de reconexão ou atividade suspeita.
+                    A conexão foi recusada pelos servidores.
                   </p>
-                  <div className="mt-4 p-3 bg-rose-950/30 border border-rose-500/20 rounded text-xs text-rose-300">
-                    Recomendação: Aguarde 24-48 horas ou use outro IP.
-                  </div>
                 </div>
               </div>
             )}

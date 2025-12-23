@@ -1,22 +1,36 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { productService } from '../services/products';
 import { Product, ProductType } from '../types';
-import { Plus, ArrowRight, Edit2, Trash2 } from 'lucide-react';
+import { Plus, ArrowRight, Edit2, Trash2, Loader2 } from 'lucide-react';
 import Modal from '../components/Modal';
+import BackendOffline from '../components/BackendOffline';
 
 const Products: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   
-  // Modals state
   const [deleteModal, setDeleteModal] = useState<{isOpen: boolean, id: string | null}>({isOpen: false, id: null});
   const [editModal, setEditModal] = useState<{isOpen: boolean, product: Product | null, newName: string}>({isOpen: false, product: null, newName: ''});
 
-  useEffect(() => {
-    productService.getAll().then(data => {
+  const loadProducts = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const data = await productService.getAll();
       setProducts(Array.isArray(data) ? data : []);
-    }).catch(() => setProducts([]));
+    } catch (e) {
+      setError(true);
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
 
   const getTypeColor = (type: ProductType) => {
     switch(type) {
@@ -28,30 +42,44 @@ const Products: React.FC = () => {
     }
   };
 
-  const confirmDelete = (id: string) => {
-    setDeleteModal({ isOpen: true, id });
-  };
+  const confirmDelete = (id: string) => setDeleteModal({ isOpen: true, id });
 
-  const executeDelete = () => {
+  const executeDelete = async () => {
     if (deleteModal.id) {
-      setProducts(prev => prev.filter(p => p.id !== deleteModal.id));
-      // In real app: await productService.delete(deleteModal.id);
+        try {
+            await productService.delete(deleteModal.id);
+            setProducts(prev => prev.filter(p => p.id !== deleteModal.id));
+        } catch (e) {
+            alert("Erro ao excluir. Backend offline?");
+        }
     }
   };
 
-  const openEdit = (product: Product) => {
-    setEditModal({ isOpen: true, product, newName: product.name });
-  };
+  const openEdit = (product: Product) => setEditModal({ isOpen: true, product, newName: product.name });
 
-  const executeEdit = () => {
+  const executeEdit = async () => {
     if (editModal.product && editModal.newName) {
-       setProducts(prev => prev.map(p => p.id === editModal.product!.id ? { ...p, name: editModal.newName } : p));
-       // In real app: await productService.update(id, { name: newName });
+       try {
+            await productService.update(editModal.product.id, { name: editModal.newName });
+            setProducts(prev => prev.map(p => p.id === editModal.product!.id ? { ...p, name: editModal.newName } : p));
+       } catch (e) {
+            alert("Erro ao editar. Backend offline?");
+       }
     }
   };
 
-  // Safe iterations
-  const safeProducts = Array.isArray(products) ? products : [];
+  if (error) {
+     return (
+        <div className="space-y-6">
+             <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold text-white">Produtos</h1>
+             </div>
+             <BackendOffline onRetry={loadProducts} />
+        </div>
+     );
+  }
+
+  if (loading) return <div className="flex h-96 items-center justify-center text-emerald-500"><Loader2 size={40} className="animate-spin" /></div>;
 
   return (
     <div className="space-y-6">
@@ -67,7 +95,7 @@ const Products: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {safeProducts.map((product) => (
+        {products.map((product) => (
           <div key={product.id} className="bg-slate-900 rounded-xl shadow-sm border border-slate-800 flex flex-col group hover:border-slate-700 transition-all">
             <div className="p-6 flex-1">
               <div className="flex justify-between items-start mb-4">
@@ -128,7 +156,7 @@ const Products: React.FC = () => {
         <p>Você tem certeza que deseja excluir este produto? Isso pode quebrar fluxos de venda ativos.</p>
       </Modal>
 
-      {/* Edit Modal (Custom Content) */}
+      {/* Edit Modal */}
       <Modal
         isOpen={editModal.isOpen}
         onClose={() => setEditModal({isOpen: false, product: null, newName: ''})}

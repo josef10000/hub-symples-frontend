@@ -1,14 +1,31 @@
-import React, { useEffect, useState } from 'react';
+
+import React, { useEffect, useState, useCallback } from 'react';
 import { abTestService } from '../services/abtest';
 import { ABTestConfig } from '../types';
-import { Split, Save, AlertCircle } from 'lucide-react';
+import { Split, Save, AlertCircle, Loader2 } from 'lucide-react';
+import BackendOffline from '../components/BackendOffline';
 
 const ABTest: React.FC = () => {
   const [config, setConfig] = useState<ABTestConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const data = await abTestService.getConfig();
+      setConfig(data);
+    } catch (e) {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    abTestService.getConfig().then(setConfig);
-  }, []);
+    loadConfig();
+  }, [loadConfig]);
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!config) return;
@@ -20,11 +37,28 @@ const ABTest: React.FC = () => {
     });
   };
 
-  const handleSave = () => {
-    if (config) abTestService.updateConfig(config);
+  const handleSave = async () => {
+    if (config) {
+        try {
+            await abTestService.updateConfig(config);
+            alert("Salvo com sucesso!");
+        } catch (e) {
+            alert("Erro ao salvar. Backend offline?");
+        }
+    }
   };
 
-  if (!config) return <div>Carregando...</div>;
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold text-white">Teste A/B</h1>
+        <BackendOffline onRetry={loadConfig} />
+      </div>
+    );
+  }
+
+  if (loading) return <div className="flex h-96 items-center justify-center text-emerald-500"><Loader2 size={40} className="animate-spin" /></div>;
+  if (!config) return <div>Sem configuração.</div>;
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">

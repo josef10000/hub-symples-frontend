@@ -8,77 +8,66 @@ export interface MediaItem {
   url: string;
 }
 
-// Helper para normalizar dados "sujos" do backend
-const normalizeItem = (item: any): MediaItem => {
-  // 1. Tenta encontrar o nome em várias propriedades comuns
-  const rawName = item.name || item.fileName || item.filename || item.originalName || item.title || 'Sem Nome';
+interface MediaApiResponse {
+  images: any[];
+  audio: any[];
+  files: any[];
+}
+
+// Helper to sanitize backend data
+const normalizeItem = (item: any, forcedType?: 'image' | 'audio' | 'file'): MediaItem => {
+  const rawName = item.name || item.fileName || item.filename || item.title || 'Untitled';
   
-  // 2. Tenta encontrar a URL
+  // Ensure we have a full URL. If backend sends relative path, prepend API URL.
   let url = item.url || item.uri || item.src || item.path || '';
-  
-  // CORREÇÃO DE URL RELATIVA: Se vier apenas "/uploads/...", adiciona o domínio da API
-  // (Ajuste a URL base conforme seu ambiente real se necessário)
   if (url && url.startsWith('/')) {
     const baseUrl = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
     url = `${baseUrl}${url}`;
   }
 
-  // 3. Normalização INTELIGENTE do Tipo
-  // Converte para minúsculo e remove espaços
-  let typeString = String(item.type || item.mime_type || '').toLowerCase();
-  let normalizedType: 'image' | 'audio' | 'file' = 'file';
-
-  // Detecção por extensão (caso o type venha vazio ou errado)
-  const isImageExt = /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(rawName) || /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(url);
-  const isAudioExt = /\.(mp3|wav|ogg|m4a|aac|wma)$/i.test(rawName) || /\.(mp3|wav|ogg|m4a|aac|wma)$/i.test(url);
-
-  if (typeString.includes('image') || isImageExt) {
-    normalizedType = 'image';
-  } else if (typeString.includes('audio') || isAudioExt) {
-    normalizedType = 'audio';
+  // Determine type from backend context or fallback to string check
+  let finalType: 'image' | 'audio' | 'file' = forcedType || 'file';
+  
+  if (!forcedType) {
+    const typeStr = String(item.type || '').toLowerCase();
+    if (typeStr.includes('image')) finalType = 'image';
+    else if (typeStr.includes('audio')) finalType = 'audio';
   }
 
   return {
-    id: String(item.id || Math.random()), // Garante que sempre tem ID
+    id: String(item.id),
     name: rawName,
-    type: normalizedType,
+    type: finalType,
     url: url
   };
 };
 
 export const mediaService = {
+  // 1. GET /media-api/list - Fetch strictly from backend
   getAll: async (): Promise<MediaItem[]> => {
     try {
-      // Usamos 'any' aqui para aceitar qualquer estrutura que o backend mandar
-      const response = await api.get<any>('/media-api');
+      // The backend MUST return { images: [], audio: [], files: [] }
+      const response = await api.get<MediaApiResponse>('/media-api/list');
       
-      let rawList: any[] = [];
+      const images = (response.images || []).map(i => normalizeItem(i, 'image'));
+      const audio = (response.audio || []).map(i => normalizeItem(i, 'audio'));
+      const files = (response.files || []).map(i => normalizeItem(i, 'file'));
 
-      // Cenário 1: Backend retorna objeto separado { images: [], audio: [] }
-      if (response && !Array.isArray(response)) {
-        const images = Array.isArray(response.images) ? response.images : [];
-        const audio = Array.isArray(response.audio) ? response.audio : [];
-        const files = Array.isArray(response.files) ? response.files : [];
-        rawList = [...images, ...audio, ...files];
-      } 
-      // Cenário 2: Backend retorna array direto [...]
-      else if (Array.isArray(response)) {
-        rawList = response;
-      }
-
-      // Aplica a normalização em CADA item
-      return rawList.map(normalizeItem);
-
+      // Flatten for UI
+      return [...images, ...audio, ...files];
     } catch (error) {
-      console.error("Erro ao processar mídia:", error);
-      return [];
+      console.error("Error fetching media list (Is backend running?):", error);
+      throw error; // Let UI handle the error state
     }
   },
 
+  // 2. POST /media-api/upload - Upload real file
   upload: async (file: File): Promise<MediaItem> => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await api.post<any>('/media/upload', formData);
+    
+    // Send to backend, wait for real response with final URL
+    const response = await api.post<any>('/media-api/upload', formData);
     return normalizeItem(response);
   },
 

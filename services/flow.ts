@@ -5,12 +5,8 @@ import { FlowNode } from '../types';
 export const flowService = {
   // Get flow configuration for a specific bot
   getFlow: async (botId: string): Promise<FlowNode[]> => {
-    try {
-      return await api.get<FlowNode[]>(`/bots/${botId}/flow`);
-    } catch (error) {
-      console.error("Error fetching flow:", error);
-      return []; // Return empty flow on error (or handle 404 for new bots)
-    }
+    // Let errors bubble up so the UI can show "Backend Offline"
+    return api.get<FlowNode[]>(`/bots/${botId}/flow`);
   },
 
   // Save the entire flow layout and configuration

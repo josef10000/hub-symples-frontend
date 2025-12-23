@@ -1,32 +1,59 @@
-import React, { useEffect, useState } from 'react';
+
+import React, { useEffect, useState, useCallback } from 'react';
 import { settingsService } from '../services/settings';
 import { Save, Shield, Loader2 } from 'lucide-react';
 import Modal from '../components/Modal';
+import BackendOffline from '../components/BackendOffline';
 
 const Settings: React.FC = () => {
   const [settings, setSettings] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [successModalOpen, setSuccessModalOpen] = useState(false);
 
-  useEffect(() => {
-    settingsService.getSettings().then(setSettings);
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const data = await settingsService.getSettings();
+      setSettings(data || { globalFallbackMessage: '', adminPhone: '' });
+    } catch (e) {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
 
   const handleSave = async () => {
     setLoading(true);
-    await settingsService.updateSettings(settings);
-    // Simulate network delay
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      await settingsService.updateSettings(settings);
       setSuccessModalOpen(true);
-    }, 800);
+    } catch (e) {
+      alert("Erro ao salvar. Backend offline?");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updateField = (key: string, value: string) => {
     setSettings((prev: any) => ({ ...prev, [key]: value }));
   };
 
-  if (!settings) return <div className="p-8 text-white">Carregando configurações...</div>;
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold text-white">Configurações</h1>
+        <BackendOffline onRetry={loadSettings} />
+      </div>
+    );
+  }
+
+  if (loading) return <div className="flex h-96 items-center justify-center text-emerald-500"><Loader2 size={40} className="animate-spin" /></div>;
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">

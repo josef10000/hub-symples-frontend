@@ -1,16 +1,41 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { timingService } from '../services/timing';
-import { Clock, Save } from 'lucide-react';
+import { Clock, Save, Loader2 } from 'lucide-react';
+import BackendOffline from '../components/BackendOffline';
 
 const Timing: React.FC = () => {
   const [timing, setTiming] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
-    timingService.getTiming().then(setTiming).catch(() => setTiming({}));
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const data = await timingService.getTiming();
+      setTiming(data || {});
+    } catch (e) {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  if (!timing) return <div>Carregando...</div>;
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold text-white">Configuração de Timing</h1>
+        <BackendOffline onRetry={loadData} />
+      </div>
+    );
+  }
+
+  if (loading) return <div className="flex h-96 items-center justify-center text-emerald-500"><Loader2 size={40} className="animate-spin" /></div>;
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
@@ -31,6 +56,7 @@ const Timing: React.FC = () => {
         </div>
 
         <div className="grid gap-6">
+          {Object.keys(timing || {}).length === 0 && <div className="text-slate-500">Sem configurações definidas.</div>}
           {Object.keys(timing || {}).map((key) => (
             <div key={key}>
               <label className="block text-sm font-medium text-slate-400 mb-1 capitalize">

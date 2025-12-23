@@ -1,56 +1,47 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { botService } from '../services/bots';
 import { whatsappService } from '../services/whatsapp';
 import { Bot as BotModel, BotStatus } from '../types';
 import Modal from '../components/Modal';
+import BackendOffline from '../components/BackendOffline';
 import { 
-  Bot, 
-  Play, 
-  Pause, 
-  Trash2, 
-  Plus, 
-  Smartphone, 
-  X, 
-  CheckCircle, 
-  Loader2, 
-  Copy, 
-  Clock, 
-  Wifi,
-  ChevronRight
+  Bot, Play, Pause, Trash2, Plus, Smartphone, X, CheckCircle, Loader2, Copy, Clock, Wifi, ChevronRight
 } from 'lucide-react';
 
 const Bots: React.FC = () => {
   const [bots, setBots] = useState<BotModel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [deleteModal, setDeleteModal] = useState<{isOpen: boolean, id: string | null}>({isOpen: false, id: null});
-  
-  // Wizard State
   const [creationStep, setCreationStep] = useState<'form' | 'processing' | 'pairing' | 'success'>('form');
   const [formData, setFormData] = useState({ name: '', phoneNumber: '', connectNow: false });
-  
-  // Pairing Data
   const [createdBot, setCreatedBot] = useState<BotModel | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(0);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<number | null>(null);
 
+  const loadBots = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const data = await botService.getAll();
+      setBots(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setError(true);
+      setBots([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadBots();
     return () => clearTimer();
-  }, []);
-
-  const loadBots = async () => {
-    try {
-      const data = await botService.getAll();
-      // Ensure data is an array before setting state
-      setBots(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Failed to load bots", error);
-      setBots([]);
-    }
-  };
+  }, [loadBots]);
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -61,61 +52,54 @@ const Bots: React.FC = () => {
 
   const handleToggle = async (id: string, currentStatus: BotStatus) => {
     const newStatus = currentStatus === BotStatus.ONLINE ? BotStatus.PAUSED : BotStatus.ONLINE;
-    await botService.toggleStatus(id, newStatus);
-    setBots(prev => prev.map(b => b.id === id ? { ...b, status: newStatus } : b));
+    try {
+        await botService.toggleStatus(id, newStatus);
+        setBots(prev => prev.map(b => b.id === id ? { ...b, status: newStatus } : b));
+    } catch (e) {
+        alert("Erro ao alterar status. Verifique a conexão.");
+    }
   };
 
-  const confirmDelete = (id: string) => {
-    setDeleteModal({ isOpen: true, id });
-  };
+  const confirmDelete = (id: string) => setDeleteModal({ isOpen: true, id });
 
   const executeDelete = async () => {
     if (deleteModal.id) {
-      await botService.delete(deleteModal.id);
-      setBots(prev => prev.filter(b => b.id !== deleteModal.id));
+      try {
+          await botService.delete(deleteModal.id);
+          setBots(prev => prev.filter(b => b.id !== deleteModal.id));
+      } catch (e) {
+          alert("Erro ao excluir robô. Verifique a conexão.");
+      }
     }
   };
 
   const handleCreateBot = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name) return;
-
     setCreationStep('processing');
-
     try {
-      // 1. Create Bot
-      const newBot = await botService.create({ 
-        name: formData.name, 
-        phoneNumber: formData.phoneNumber 
-      });
+      const newBot = await botService.create({ name: formData.name, phoneNumber: formData.phoneNumber });
       setCreatedBot(newBot);
-      await loadBots(); // Refresh list background
+      await loadBots();
 
-      // 2. If Connect Now is checked, get pairing code
       if (formData.connectNow) {
         const pairingResponse = await whatsappService.requestPairingCode(newBot.id);
         setPairingCode(pairingResponse.pairingCode);
         setTimeLeft(pairingResponse.expiresIn);
         
-        // Start Timer
         timerRef.current = window.setInterval(() => {
           setTimeLeft((prev) => {
-            if (prev <= 1) {
-              clearTimer();
-              return 0;
-            }
+            if (prev <= 1) { clearTimer(); return 0; }
             return prev - 1;
           });
         }, 1000);
-
         setCreationStep('pairing');
       } else {
         setCreationStep('success');
         setTimeout(() => closeModal(), 1500);
       }
     } catch (error) {
-      console.error("Creation failed", error);
-      // Handle error state here
+      alert("Falha ao criar robô. O backend está offline?");
       setCreationStep('form');
     }
   };
@@ -137,8 +121,18 @@ const Bots: React.FC = () => {
     }
   };
 
-  // Safe list access for rendering
-  const safeBots = Array.isArray(bots) ? bots : [];
+  if (error) {
+    return (
+        <div className="space-y-6">
+             <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold text-white">Orquestração de Robôs</h1>
+             </div>
+             <BackendOffline onRetry={loadBots} />
+        </div>
+    )
+  }
+
+  if (loading) return <div className="flex h-96 items-center justify-center text-emerald-500"><Loader2 size={40} className="animate-spin" /></div>;
 
   return (
     <div className="space-y-6">
@@ -158,77 +152,84 @@ const Bots: React.FC = () => {
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {safeBots.map((bot) => (
-          <div key={bot.id} className="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden hover:border-slate-700 transition-all">
-            <div className="p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-3">
-                  <div className={`p-3 rounded-full ${bot.status === BotStatus.ONLINE ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-                    <Bot size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-white">{bot.name}</h3>
-                    <div className="flex items-center gap-1 text-sm text-slate-500">
-                      <Smartphone size={14} />
-                      <span>{bot.phoneNumber || 'Sem Número'}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className={`px-2 py-1 rounded text-xs font-bold border ${
-                  bot.status === BotStatus.ONLINE 
-                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                    : 'bg-slate-800 text-slate-400 border-slate-700'
-                }`}>
-                  {bot.status}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 py-4 border-t border-slate-800 mb-4">
-                <div className="text-center">
-                  <div className="text-xs text-slate-500">Conversas</div>
-                  <div className="font-semibold text-white">{bot.stats?.conversations || 0}</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-slate-500">Vendas</div>
-                  <div className="font-semibold text-white">{bot.stats?.sales || 0}</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-slate-500">Receita</div>
-                  <div className="font-semibold text-emerald-400">R$ {bot.stats?.revenue || 0}</div>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                 <button 
-                  onClick={() => handleToggle(bot.id, bot.status)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors border ${
-                    bot.status === BotStatus.ONLINE 
-                      ? 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20'
-                      : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
-                  }`}
-                 >
-                   {bot.status === BotStatus.ONLINE ? <Pause size={16} /> : <Play size={16} />}
-                   {bot.status === BotStatus.ONLINE ? 'Pausar' : 'Ativar'}
-                 </button>
-                 <button 
-                   onClick={() => confirmDelete(bot.id)}
-                   className="flex items-center justify-center p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
-                   title="Excluir Robô"
-                 >
-                   <Trash2 size={18} />
-                 </button>
-              </div>
-            </div>
-            {bot.abTestGroup && (
-               <div className="bg-slate-950/50 border-t border-slate-800 px-6 py-2 text-xs text-slate-500 flex justify-between items-center">
-                 <span>Teste A/B Ativo</span>
-                 <span className="font-mono bg-slate-800 text-slate-300 px-2 rounded">Grupo {bot.abTestGroup}</span>
-               </div>
-            )}
+      {bots.length === 0 ? (
+          <div className="text-center py-20 bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
+              <Bot size={48} className="mx-auto text-slate-600 mb-4" />
+              <p className="text-slate-400">Nenhum robô encontrado. Crie o primeiro para começar.</p>
           </div>
-        ))}
-      </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {bots.map((bot) => (
+            <div key={bot.id} className="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden hover:border-slate-700 transition-all">
+                <div className="p-6">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center gap-3">
+                    <div className={`p-3 rounded-full ${bot.status === BotStatus.ONLINE ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                        <Bot size={24} />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-white">{bot.name}</h3>
+                        <div className="flex items-center gap-1 text-sm text-slate-500">
+                        <Smartphone size={14} />
+                        <span>{bot.phoneNumber || 'Sem Número'}</span>
+                        </div>
+                    </div>
+                    </div>
+                    <div className={`px-2 py-1 rounded text-xs font-bold border ${
+                    bot.status === BotStatus.ONLINE 
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}>
+                    {bot.status}
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 py-4 border-t border-slate-800 mb-4">
+                    <div className="text-center">
+                    <div className="text-xs text-slate-500">Conversas</div>
+                    <div className="font-semibold text-white">{bot.stats?.conversations || 0}</div>
+                    </div>
+                    <div className="text-center">
+                    <div className="text-xs text-slate-500">Vendas</div>
+                    <div className="font-semibold text-white">{bot.stats?.sales || 0}</div>
+                    </div>
+                    <div className="text-center">
+                    <div className="text-xs text-slate-500">Receita</div>
+                    <div className="font-semibold text-emerald-400">R$ {bot.stats?.revenue || 0}</div>
+                    </div>
+                </div>
+
+                <div className="flex gap-2">
+                    <button 
+                    onClick={() => handleToggle(bot.id, bot.status)}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors border ${
+                        bot.status === BotStatus.ONLINE 
+                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20'
+                        : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                    }`}
+                    >
+                    {bot.status === BotStatus.ONLINE ? <Pause size={16} /> : <Play size={16} />}
+                    {bot.status === BotStatus.ONLINE ? 'Pausar' : 'Ativar'}
+                    </button>
+                    <button 
+                    onClick={() => confirmDelete(bot.id)}
+                    className="flex items-center justify-center p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
+                    title="Excluir Robô"
+                    >
+                    <Trash2 size={18} />
+                    </button>
+                </div>
+                </div>
+                {bot.abTestGroup && (
+                <div className="bg-slate-950/50 border-t border-slate-800 px-6 py-2 text-xs text-slate-500 flex justify-between items-center">
+                    <span>Teste A/B Ativo</span>
+                    <span className="font-mono bg-slate-800 text-slate-300 px-2 rounded">Grupo {bot.abTestGroup}</span>
+                </div>
+                )}
+            </div>
+            ))}
+        </div>
+      )}
 
       {/* DELETE MODAL */}
       <Modal
@@ -242,9 +243,9 @@ const Bots: React.FC = () => {
         <p>Tem certeza que deseja excluir este robô? Todos os dados históricos e fluxos associados serão perdidos permanentemente.</p>
       </Modal>
 
-      {/* CREATE BOT MODAL - (Conteúdo omitido para brevidade, mantido igual ao original) */}
+      {/* CREATE BOT MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-slate-900 rounded-2xl border border-slate-800 w-full max-w-lg shadow-2xl relative overflow-hidden">
             
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900">
