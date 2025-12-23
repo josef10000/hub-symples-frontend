@@ -8,7 +8,7 @@ interface RequestOptions extends RequestInit {
 
 // --- MOCK DATABASE (LocalStorage) ---
 // This ensures the app works even without the backend running
-const STORAGE_KEY = 'hubsymples_mock_db_v1';
+const STORAGE_KEY = 'hubsymples_mock_db_v2'; // Bumped version to reset data
 
 const getDb = () => {
   try {
@@ -131,18 +131,46 @@ const mockRequest = async (method: string, endpoint: string, data?: any) => {
     }
   }
 
-  // --- MEDIA ---
+  // --- MEDIA API (Specific Endpoint) ---
+  if (path[0] === 'media-api') {
+    if (method === 'GET') {
+      // Return structured data as expected by the new frontend logic
+      const images = db.media.filter((m: any) => m.type === 'image');
+      const audio = db.media.filter((m: any) => m.type === 'audio');
+      const files = db.media.filter((m: any) => m.type === 'file');
+      
+      return { images, audio, files };
+    }
+  }
+
+  // --- MEDIA (Standard CRUD) ---
   if (path[0] === 'media') {
     if (path.length === 1 && method === 'GET') return db.media;
     
     if (path.length === 2 && path[1] === 'upload' && method === 'POST') {
-      // Mock upload - extract file name from FormData if possible, or just fake it
+      // SMART MOCK UPLOAD: Handles Blob URLs so you can see/hear local files
+      let file: File | null = null;
+      if (data instanceof FormData) {
+        file = data.get('file') as File;
+      }
+
+      // 1. Generate a real local URL so the browser can play/show it
+      const blobUrl = file ? URL.createObjectURL(file) : 'https://via.placeholder.com/150';
+      
+      // 2. Detect Type correctly
+      const mimeType = file?.type || '';
+      let simpleType = 'file';
+      if (mimeType.startsWith('image/')) simpleType = 'image';
+      else if (mimeType.startsWith('audio/')) simpleType = 'audio';
+
+      // 3. Create Object
       const newMedia = {
         id: Math.random().toString(36).substr(2, 9),
-        url: 'https://via.placeholder.com/150', // Fake URL
-        type: 'image', // Simplification
-        name: 'Uploaded File'
+        url: blobUrl,
+        type: simpleType,
+        name: file?.name || 'Arquivo Carregado'
       };
+
       db.media.push(newMedia);
       saveDb(db);
       return newMedia;
